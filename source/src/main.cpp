@@ -1,13 +1,19 @@
 //***************************************************************************************************
 //                                      I T A G T E S T                                             *
 //***************************************************************************************************
-//*  Test for BLE Itag.                                                                             *
-//*  React on the pushbutton of a cheap Bluetooth Itags.                                            *
+//*  Test for BLE iTag.                                                                             *
+//*  React on cheap Bluetooth Itags.                                                                *
 //*  By Ed Smallenburg.                                                                             *
 //***************************************************************************************************
 // Note: If you try to connect to an Itag that is not switched on or absent, the 2nd call to the    *
 // connect function will never return.  That is why we now connect to advertized Itags only.        *
 // Hopefully a connect after disconnect will work.....                                              *
+// Bug: trying to register notifications on button press crashes the software.  So I removed that   *
+// part of the sketch, see the definition of NOTIFY.                                                *
+// Another bug:  It seems that when you have 2 iTags connected, disconnecting one will result in    *
+// disconnects for both devices.  After some time the second will try to reconnect, but this will   *
+// not always work.                                                                                 *
+// So this sketch will work best with only one active iTag.                                         *
 //***************************************************************************************************
 // Configuration:                                                                                   *
 // Enter the mac addresses of your Itags in the "Itag" table below.                                 *                                                                                                 *
@@ -16,9 +22,12 @@
 // ----------  -----  ----------------------------------------------------------------------------- *
 // 08-11-2020  ES     First set-up.                                                                 *
 // 09-11-2020  ES     Only connect to advertized Itags.                                             *
+// 11-01-2021  ES     Removed notify (causes crash).                                                *
 //***************************************************************************************************
 #include <Arduino.h>
 #include <BLEDevice.h>
+
+#define NOTIFY 0                                                     // No notify on button push
 
 BLEUUID     batteryServiceUUID ( BLEUUID ( (uint16_t)0x180f ) ) ;    // The remote service we wish to connect to.
 BLEUUID     batteryCharUUID    ( BLEUUID ( (uint16_t)0x2a19 ) ) ;    // The characteristic of the remote service we are interested in.
@@ -88,20 +97,33 @@ class myADC: public BLEAdvertisedDeviceCallbacks
 //                             B L E C L I E N T C A L L B A C K S                                  *
 //***************************************************************************************************
 // Call-back functions for connect and disconnect to/from an Itag.                                  *
+// On disconnect, the iTag will beep.                                                               *
 //***************************************************************************************************
 class MyClientCallbacks: public BLEClientCallbacks
 {
   void onConnect ( BLEClient *pClient )                                  // Itag has connected
   {
-    const char *p = pClient->getPeerAddress().toString().c_str() ;
-    Serial.printf ( "Connected to Itag server %s\n", p ) ;
+    char macstr[24] ;                                                    // mac address
+
+    strcpy ( macstr, pClient->getPeerAddress().toString().c_str() ) ;
+    Serial.printf ( "Connected to Itag server %s\n", macstr ) ;
   } ;
 
   void onDisconnect ( BLEClient *pClient )                               // Itag has disconnected
   {
-    const char *p = pClient->getPeerAddress().toString().c_str() ;
-    pClient->disconnect() ;                                              // Disconnect client as well
-    Serial.printf ( "Disconnected from Itag %s\n", p ) ;
+    char macstr[24] ;                                                    // mac address
+    int  i ;                                                             // Index in iTag[]
+
+    strcpy ( macstr, pClient->getPeerAddress().toString().c_str() ) ;
+    Serial.printf ( "Disconnected from Itag %s\n", macstr ) ;
+    for ( i = 0 ; i < NITAGS ; i++ )                                    // Search in Itag[]
+    {
+      if ( strcmp ( Itag[i].ItagAddress, macstr ) == 0 )                // Match?
+      {
+        Itag[i].advertized = false ;                                    // Yes, set to not advertized
+        break ;                                                         // No need to continue
+      }
+    }
   } ;
 } ;
 
@@ -173,11 +195,18 @@ void connectToServer ( int i )
   if ( pRemoteService )
   {
     Serial.println ( "Found button service" ) ;
-    Itag[i].pRemChar = pRemoteService->getCharacteristic ( buttonCharUUID ) ;
-    if ( Itag[i].pRemChar )                                     // Characteristic found?
+    if ( NOTIFY )
     {
-      Itag[i].pRemChar->registerForNotify ( notifyCallback ) ;  // Yes, set callback function
-      Serial.println ( "Notification Callback set" ) ;
+      Itag[i].pRemChar = pRemoteService->getCharacteristic ( buttonCharUUID ) ;
+      if ( Itag[i].pRemChar )                                     // Characteristic found?
+      {
+        Itag[i].pRemChar->registerForNotify ( notifyCallback ) ;  // Yes, set callback function
+        Serial.println ( "Notification Callback set" ) ;
+      }
+    }
+    else
+    {
+      Serial.println ( "Button notify service not activated" ) ;
     }
   }
   else
@@ -203,7 +232,7 @@ void setup()
   for ( i = 0 ; i < NITAGS ; i++ )
   {
     Itag[i].pServerAddress = new BLEAddress ( Itag[i].ItagAddress ) ; // Address of Itag
-    Itag[i].pClient  = BLEDevice::createClient() ;                    // Address of client
+    Itag[i].pClient = BLEDevice::createClient() ;                     // Address of client
     Itag[i].pClient->setClientCallbacks ( new MyClientCallbacks() ) ; // Callbacks from network
   }
   pBLEScan = BLEDevice::getScan() ;                                   // Create scanner
@@ -236,7 +265,8 @@ void loop()
     if ( scanrequired )
     {
       Serial.println ( "Start scan" ) ;
-      pBLEScan->start ( 10 ) ;                             // Scan for 10 seconds
+      pBLEScan->start ( 5 ) ;                              // Scan for 5 seconds
+      Serial.println ( "End of scan" ) ;
     }
     for ( i = 0 ; i < NITAGS ; i++ )                       // Try all known Itags
     {
@@ -251,6 +281,6 @@ void loop()
         }
       }
     }
-    newcontime = millis() + 5000 ;                         // Scedule new trial
+    newcontime = millis() + 5000 ;                         // Schedule new trial
   }
 }
