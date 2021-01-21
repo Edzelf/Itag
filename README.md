@@ -5,6 +5,4 @@ The program will scan for the devices and connect to it.  The build-in LED will 
 If you have a buzzer attached, is will beep whena new iTag is found or when the pushbutton on the iTag is activated.
 Debug lines are on the serial port (115200 Bd).
 
-The sketch uses a modified NimBLE library.  It is included in the zip file.
-
 ![alt text](https://github.com/Edzelf/Itag/blob/main/itag.jpg?raw=true)
